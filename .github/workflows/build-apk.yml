@@ -1,0 +1,210 @@
+name: Galaxy Booster Ultimate 2.3 APK
+'on':
+  push:
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-java@v4
+      with:
+        distribution: temurin
+        java-version: 17
+    - uses: gradle/actions/setup-gradle@v4
+      with:
+        gradle-version: 8.7
+    - name: Projeyi olustur
+      run: |
+        set -e
+        P=GalaxyBooster
+        K=$P/app/src/main/java/com/galaxy/booster
+        mkdir -p $K $P/app/src/main
+        cat > $P/settings.gradle <<'EOF'
+        pluginManagement {
+            repositories { google(); mavenCentral(); gradlePluginPortal() }
+        }
+        dependencyResolutionManagement {
+            repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+            repositories { google(); mavenCentral() }
+        }
+        rootProject.name = "GalaxyBooster"
+        include ':app'
+        EOF
+        cat > $P/build.gradle <<'EOF'
+        plugins {
+            id 'com.android.application' version '8.5.0' apply false
+        }
+        EOF
+        cat > $P/gradle.properties <<'EOF'
+        org.gradle.jvmargs=-Xmx2g
+        android.useAndroidX=true
+        EOF
+        cat > $P/app/build.gradle <<'EOF'
+        plugins {
+            id 'com.android.application'
+        }
+        android {
+            namespace 'com.galaxy.booster'
+            compileSdk 34
+            defaultConfig {
+                applicationId 'com.galaxy.booster'
+                minSdk 24
+                targetSdk 34
+                versionCode 23
+                versionName '2.3'
+            }
+            compileOptions {
+                sourceCompatibility JavaVersion.VERSION_17
+                targetCompatibility JavaVersion.VERSION_17
+            }
+        }
+        EOF
+        cat > $P/app/src/main/AndroidManifest.xml <<'EOF'
+        <?xml version="1.0" encoding="utf-8"?>
+        <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+            <uses-permission android:name="android.permission.SET_WALLPAPER" />
+            <application
+                android:label="Galaxy Booster Ultimate"
+                android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
+                <activity android:name=".MainActivity" android:exported="true">
+                    <intent-filter>
+                        <action android:name="android.intent.action.MAIN" />
+                        <category android:name="android.intent.category.LAUNCHER" />
+                    </intent-filter>
+                </activity>
+            </application>
+        </manifest>
+        EOF
+        cat > $K/MainActivity.java <<'EOF'
+        package com.galaxy.booster;
+
+        import android.app.Activity;
+        import android.app.ActivityManager;
+        import android.app.WallpaperManager;
+        import android.content.Context;
+        import android.graphics.Bitmap;
+        import android.graphics.Canvas;
+        import android.graphics.Color;
+        import android.graphics.Paint;
+        import android.graphics.RadialGradient;
+        import android.graphics.Shader;
+        import android.graphics.drawable.BitmapDrawable;
+        import android.os.Bundle;
+        import android.view.Gravity;
+        import android.view.View;
+        import android.widget.Button;
+        import android.widget.LinearLayout;
+        import android.widget.TextView;
+        import android.widget.Toast;
+        import java.io.File;
+        import java.util.Random;
+
+        public class MainActivity extends Activity {
+            private TextView info;
+
+            @Override
+            protected void onCreate(Bundle b) {
+                super.onCreate(b);
+                LinearLayout root = new LinearLayout(this);
+                root.setOrientation(LinearLayout.VERTICAL);
+                root.setGravity(Gravity.CENTER);
+                root.setPadding(48, 48, 48, 48);
+                root.setBackground(new BitmapDrawable(getResources(), galaxy(540, 1170)));
+
+                TextView title = new TextView(this);
+                title.setText("Galaxy Booster Ultimate 2.3");
+                title.setTextColor(Color.WHITE);
+                title.setTextSize(24);
+                title.setGravity(Gravity.CENTER);
+
+                info = new TextView(this);
+                info.setTextColor(Color.WHITE);
+                info.setTextSize(16);
+                info.setGravity(Gravity.CENTER);
+                info.setPadding(0, 48, 0, 48);
+
+                Button boost = new Button(this);
+                boost.setText("HIZLANDIR");
+                boost.setOnClickListener(new View.OnClickListener() {
+                    public void onClick(View v) { boost(); }
+                });
+
+                Button wall = new Button(this);
+                wall.setText("GALAKSI DUVAR KAGIDI YAP");
+                wall.setOnClickListener(new View.OnClickListener() {
+                    public void onClick(View v) { setWall(); }
+                });
+
+                root.addView(title);
+                root.addView(info);
+                root.addView(boost);
+                root.addView(wall);
+                setContentView(root);
+                refresh();
+            }
+
+            private void refresh() {
+                ActivityManager am = (ActivityManager) getSystemService(Context.ACTIVITY_SERVICE);
+                ActivityManager.MemoryInfo mi = new ActivityManager.MemoryInfo();
+                am.getMemoryInfo(mi);
+                info.setText("Bos RAM: " + (mi.availMem / 1048576) + " MB / " + (mi.totalMem / 1048576) + " MB");
+            }
+
+            private void boost() {
+                long freed = 0;
+                File[] files = getCacheDir().listFiles();
+                if (files != null) {
+                    for (File f : files) freed += delete(f);
+                }
+                System.gc();
+                refresh();
+                Toast.makeText(this, "Temizlendi: " + (freed / 1024) + " KB", Toast.LENGTH_SHORT).show();
+            }
+
+            private long delete(File f) {
+                long n = 0;
+                if (f.isDirectory()) {
+                    File[] c = f.listFiles();
+                    if (c != null) for (File x : c) n += delete(x);
+                }
+                n += f.length();
+                f.delete();
+                return n;
+            }
+
+            private void setWall() {
+                try {
+                    WallpaperManager.getInstance(this).setBitmap(galaxy(1080, 2340));
+                    Toast.makeText(this, "Duvar kagidi ayarlandi", Toast.LENGTH_SHORT).show();
+                } catch (Exception e) {
+                    Toast.makeText(this, "Hata: " + e.getMessage(), Toast.LENGTH_LONG).show();
+                }
+            }
+
+            private Bitmap galaxy(int w, int h) {
+                Bitmap bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+                Canvas c = new Canvas(bmp);
+                c.drawColor(Color.rgb(8, 0, 24));
+                Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+                p.setShader(new RadialGradient(w / 2f, h / 2.4f, Math.max(w, h) * 0.7f,
+                        new int[]{Color.argb(230, 170, 70, 255), Color.argb(150, 90, 20, 170), Color.argb(0, 8, 0, 24)},
+                        new float[]{0f, 0.5f, 1f}, Shader.TileMode.CLAMP));
+                c.drawRect(0, 0, w, h, p);
+                p.setShader(null);
+                Random r = new Random(7);
+                for (int i = 0; i < 350; i++) {
+                    p.setColor(Color.argb(120 + r.nextInt(135), 255, 255, 255));
+                    c.drawCircle(r.nextInt(w), r.nextInt(h), 1f + r.nextFloat() * 2.5f, p);
+                }
+                return bmp;
+            }
+        }
+        EOF
+    - name: APK derle
+      run: gradle -p GalaxyBooster assembleDebug --no-daemon --stacktrace
+    - name: APK yukle
+      uses: actions/upload-artifact@v4
+      with:
+        name: Galaxy-Booster-Ultimate-2.3-APK
+        path: GalaxyBooster/app/build/outputs/apk/debug/*.apk
