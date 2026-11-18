@@ -1,0 +1,1225 @@
+# JBL Optimizer – tek dosyalık APK derleme akışı
+# Kullanım: bu dosyayı GitHub reposunda .github/workflows/build-apk.yml olarak kaydet.
+# Actions sekmesi -> "Build JBL Optimizer APK" -> Run workflow.
+# APK: reponun "Releases" bölümünde (JBL-Optimizer.apk) ve Actions > Artifacts içinde.
+name: Build JBL Optimizer APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main, master ]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.9
+
+      - name: Proje dosyalarını oluştur
+        run: |
+          mkdir -p "$(dirname 'settings.gradle')"
+          cat > 'settings.gradle' <<'EOF_0'
+          pluginManagement {
+              repositories { google(); mavenCentral(); gradlePluginPortal() }
+          }
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories { google(); mavenCentral() }
+          }
+          rootProject.name = "JBLOptimizer"
+          include ':app'
+          EOF_0
+          mkdir -p "$(dirname 'build.gradle')"
+          cat > 'build.gradle' <<'EOF_1'
+          plugins {
+              id 'com.android.application' version '8.5.2' apply false
+              id 'org.jetbrains.kotlin.android' version '1.9.24' apply false
+          }
+          EOF_1
+          mkdir -p "$(dirname 'gradle.properties')"
+          cat > 'gradle.properties' <<'EOF_2'
+          org.gradle.jvmargs=-Xmx2g -Dfile.encoding=UTF-8
+          android.useAndroidX=false
+          kotlin.code.style=official
+          EOF_2
+          mkdir -p "$(dirname 'app/build.gradle')"
+          cat > 'app/build.gradle' <<'EOF_3'
+          plugins {
+              id 'com.android.application'
+              id 'org.jetbrains.kotlin.android'
+          }
+          android {
+              namespace 'com.jbl.optimizer'
+              compileSdk 34
+              defaultConfig {
+                  applicationId 'com.jbl.optimizer'
+                  minSdk 28
+                  targetSdk 34
+                  versionCode 1
+                  versionName '1.0'
+              }
+              buildTypes {
+                  release { minifyEnabled false }
+              }
+              compileOptions {
+                  sourceCompatibility JavaVersion.VERSION_17
+                  targetCompatibility JavaVersion.VERSION_17
+              }
+              kotlinOptions { jvmTarget = '17' }
+          }
+          EOF_3
+          mkdir -p "$(dirname 'app/src/main/AndroidManifest.xml')"
+          cat > 'app/src/main/AndroidManifest.xml' <<'EOF_4'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <uses-permission android:name="android.permission.READ_PHONE_STATE" />
+              <uses-permission android:name="android.permission.READ_CALL_LOG" />
+              <uses-permission android:name="android.permission.READ_CONTACTS" />
+              <uses-permission android:name="android.permission.ANSWER_PHONE_CALLS" />
+              <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+              <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+              <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+              <uses-permission android:name="android.permission.VIBRATE" />
+
+              <application
+                  android:label="JBL Optimizer"
+                  android:allowBackup="false"
+                  android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
+
+                  <activity android:name=".MainActivity" android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+
+                  <service
+                      android:name=".OptService"
+                      android:exported="false"
+                      android:foregroundServiceType="mediaPlayback" />
+
+                  <service
+                      android:name=".NotifService"
+                      android:exported="true"
+                      android:label="JBL Optimizer"
+                      android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+                      <intent-filter>
+                          <action android:name="android.service.notification.NotificationListenerService" />
+                      </intent-filter>
+                  </service>
+              </application>
+          </manifest>
+          EOF_4
+          mkdir -p "$(dirname 'app/src/main/java/com/jbl/optimizer/Prefs.kt')"
+          cat > 'app/src/main/java/com/jbl/optimizer/Prefs.kt' <<'EOF_5'
+          package com.jbl.optimizer
+
+          import android.content.Context
+          import android.content.SharedPreferences
+
+          object Prefs {
+              fun sp(c: Context): SharedPreferences = c.getSharedPreferences("jbl", Context.MODE_PRIVATE)
+
+              // 5 noktalı EQ eğrisi (dB): bas -> tiz. Cihazın band sayısına göre ara değerlenir.
+              val PRESETS = linkedMapOf(
+                  "Düz" to floatArrayOf(0f, 0f, 0f, 0f, 0f),
+                  "Bass" to floatArrayOf(6f, 4f, 0f, -1f, -1f),
+                  "Klasik" to floatArrayOf(4f, 2f, -1f, 2f, 3f),
+                  "Vokal" to floatArrayOf(-2f, 0f, 4f, 3f, 0f),
+                  "Spor" to floatArrayOf(4f, 1f, 0f, 2f, 4f),
+                  "Gece" to floatArrayOf(3f, 1f, 0f, -2f, -4f)
+              )
+
+              val APPS = linkedMapOf(
+                  "com.whatsapp" to "WhatsApp",
+                  "com.whatsapp.w4b" to "WhatsApp Business",
+                  "com.google.android.apps.messaging" to "Google Mesajlar (SMS)",
+                  "com.samsung.android.messaging" to "Samsung Mesajlar (SMS)",
+                  "com.android.mms" to "Mesajlar (AOSP / MIUI)",
+                  "org.telegram.messenger" to "Telegram",
+                  "com.facebook.orca" to "Messenger"
+              )
+
+              val DEFAULT_PKGS = setOf(
+                  "com.whatsapp",
+                  "com.whatsapp.w4b",
+                  "com.google.android.apps.messaging",
+                  "com.samsung.android.messaging",
+                  "com.android.mms"
+              )
+          }
+          EOF_5
+          mkdir -p "$(dirname 'app/src/main/java/com/jbl/optimizer/NotifService.kt')"
+          cat > 'app/src/main/java/com/jbl/optimizer/NotifService.kt' <<'EOF_6'
+          package com.jbl.optimizer
+
+          import android.app.Notification
+          import android.service.notification.NotificationListenerService
+          import android.service.notification.StatusBarNotification
+
+          class NotifService : NotificationListenerService() {
+
+              private val last = HashMap<String, String>()
+
+              override fun onListenerConnected() {
+                  OptService.inst?.registerSessions()
+              }
+
+              override fun onNotificationPosted(sbn: StatusBarNotification?) {
+                  if (sbn == null) return
+                  val svc = OptService.inst ?: return
+                  if (sbn.packageName == packageName) return
+                  val sp = Prefs.sp(this)
+                  if (!sp.getBoolean("readMsgs", true)) return
+                  val pkgs = sp.getStringSet("pkgs", Prefs.DEFAULT_PKGS) ?: Prefs.DEFAULT_PKGS
+                  if (!pkgs.contains(sbn.packageName)) return
+
+                  val n = sbn.notification ?: return
+                  if (n.flags and Notification.FLAG_GROUP_SUMMARY != 0) return
+                  val ex = n.extras ?: return
+                  val title = ex.getCharSequence(Notification.EXTRA_TITLE)?.toString() ?: return
+                  val text = ex.getCharSequence(Notification.EXTRA_TEXT)?.toString() ?: return
+                  if (title == "WhatsApp" || title.isBlank() || text.isBlank()) return
+
+                  if (sp.getBoolean("driveOnly", false) && !svc.carConnected()) return
+
+                  val key = sbn.key
+                  if (last[key] == text) return
+                  last[key] = text
+                  svc.enqueue(key, title + ": " + text)
+              }
+
+              // Kullanıcı mesajı uygulamadan açarsa bildirim kalkar -> okuma iptal
+              override fun onNotificationRemoved(sbn: StatusBarNotification?) {
+                  if (sbn == null) return
+                  last.remove(sbn.key)
+                  OptService.inst?.cancelKey(sbn.key)
+              }
+          }
+          EOF_6
+          mkdir -p "$(dirname 'app/src/main/java/com/jbl/optimizer/OptService.kt')"
+          cat > 'app/src/main/java/com/jbl/optimizer/OptService.kt' <<'EOF_7'
+          package com.jbl.optimizer
+
+          import android.app.Notification
+          import android.app.NotificationChannel
+          import android.app.NotificationManager
+          import android.app.PendingIntent
+          import android.app.Service
+          import android.app.UiModeManager
+          import android.bluetooth.BluetoothClass
+          import android.bluetooth.BluetoothDevice
+          import android.bluetooth.BluetoothManager
+          import android.content.BroadcastReceiver
+          import android.content.ComponentName
+          import android.content.Context
+          import android.content.Intent
+          import android.content.IntentFilter
+          import android.content.SharedPreferences
+          import android.content.pm.ServiceInfo
+          import android.content.res.Configuration
+          import android.graphics.drawable.Icon
+          import android.media.AudioAttributes
+          import android.media.AudioDeviceInfo
+          import android.media.AudioFocusRequest
+          import android.media.AudioManager
+          import android.media.audiofx.BassBoost
+          import android.media.audiofx.Equalizer
+          import android.media.session.MediaController
+          import android.media.session.MediaSession
+          import android.media.session.MediaSessionManager
+          import android.media.session.PlaybackState
+          import android.net.Uri
+          import android.os.Build
+          import android.os.Handler
+          import android.os.IBinder
+          import android.os.Looper
+          import android.os.VibrationEffect
+          import android.os.Vibrator
+          import android.provider.ContactsContract
+          import android.speech.tts.TextToSpeech
+          import android.speech.tts.UtteranceProgressListener
+          import android.telecom.TelecomManager
+          import android.telephony.TelephonyManager
+          import android.view.KeyEvent
+          import java.text.SimpleDateFormat
+          import java.util.Date
+          import java.util.Locale
+
+          @Suppress("DEPRECATION")
+          class OptService : Service() {
+
+              companion object {
+                  @Volatile
+                  var inst: OptService? = null
+                  const val CH = "jbl_opt"
+                  const val NID = 1
+                  const val A_PLAY = "jbl.play"
+                  const val A_NEXT = "jbl.next"
+                  const val A_PREV = "jbl.prev"
+                  const val A_EQ = "jbl.eq"
+                  const val A_PRESET = "jbl.preset"
+                  const val A_SLEEP = "jbl.sleep"
+                  const val A_SLEEPSET = "jbl.sleepset"
+                  const val A_STOP = "jbl.stop"
+              }
+
+              private val h = Handler(Looper.getMainLooper())
+              private lateinit var sp: SharedPreferences
+              private lateinit var session: MediaSession
+              private val am by lazy { getSystemService(AudioManager::class.java) }
+              private val msm by lazy { getSystemService(MediaSessionManager::class.java) }
+              private val comp by lazy { ComponentName(this, NotifService::class.java) }
+              private val lite: Boolean get() = sp.getBoolean("lite", false)
+
+              // ---------------- Bildirim (hızlı kontrol paneli) ----------------
+              private var sleepEnd = 0L
+              private val sleepSteps = intArrayOf(0, 15, 30, 60)
+              private var sleepIdx = 0
+
+              private fun buildNotif(): Notification {
+                  fun pi(a: String, rc: Int) = PendingIntent.getService(
+                      this, rc, Intent(this, OptService::class.java).setAction(a),
+                      PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+                  )
+
+                  fun act(res: Int, t: String, a: String, rc: Int) =
+                      Notification.Action.Builder(Icon.createWithResource(this, res), t, pi(a, rc)).build()
+
+                  val open = PendingIntent.getActivity(
+                      this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE
+                  )
+                  val m = mainDev()
+                  val bt = if (m != null) {
+                      val l = batt[m] ?: -1
+                      "🎧 " + (devs[m] ?: "") + " " + (if (l >= 0) "%" + l else "pil ?")
+                  } else "Kulaklık bağlı değil"
+                  val sl = if (sleepEnd > 0) " · 💤 " + SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(sleepEnd)) else ""
+                  return Notification.Builder(this, CH)
+                      .setSmallIcon(android.R.drawable.stat_sys_headset)
+                      .setContentTitle("JBL Optimizer · EQ: " + sp.getString("preset", "Düz"))
+                      .setContentText(bt + sl)
+                      .setOngoing(true)
+                      .setOnlyAlertOnce(true)
+                      .setShowWhen(false)
+                      .setContentIntent(open)
+                      .addAction(act(android.R.drawable.ic_media_previous, "Geri", A_PREV, 1))
+                      .addAction(act(android.R.drawable.ic_media_play, "Oynat/Dur", A_PLAY, 2))
+                      .addAction(act(android.R.drawable.ic_media_next, "İleri", A_NEXT, 3))
+                      .addAction(act(android.R.drawable.ic_menu_manage, "EQ", A_EQ, 4))
+                      .addAction(act(android.R.drawable.ic_lock_idle_alarm, "Uyku", A_SLEEP, 5))
+                      .build()
+              }
+
+              private fun startFg() {
+                  val n = buildNotif()
+                  if (Build.VERSION.SDK_INT >= 29) {
+                      startForeground(NID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
+                  } else {
+                      startForeground(NID, n)
+                  }
+              }
+
+              fun refresh() {
+                  try {
+                      getSystemService(NotificationManager::class.java).notify(NID, buildNotif())
+                  } catch (e: Exception) {
+                  }
+              }
+
+              // ---------------- Yaşam döngüsü ----------------
+              override fun onBind(i: Intent?): IBinder? = null
+
+              override fun onCreate() {
+                  super.onCreate()
+                  inst = this
+                  sp = Prefs.sp(this)
+                  getSystemService(NotificationManager::class.java)
+                      .createNotificationChannel(NotificationChannel(CH, "JBL Optimizer", NotificationManager.IMPORTANCE_LOW))
+                  startFg()
+                  initTts()
+
+                  session = MediaSession(this, "JBLOptimizer")
+                  session.setCallback(cb)
+                  session.setPlaybackState(playingState())
+                  session.isActive = true
+
+                  scanBt()
+                  val bf = IntentFilter()
+                  bf.addAction(BluetoothDevice.ACTION_ACL_CONNECTED)
+                  bf.addAction(BluetoothDevice.ACTION_ACL_DISCONNECTED)
+                  bf.addAction("android.bluetooth.device.action.BATTERY_LEVEL_CHANGED")
+                  reg(btRx, bf)
+                  reg(phoneRx, IntentFilter(TelephonyManager.ACTION_PHONE_STATE_CHANGED))
+                  registerSessions()
+                  setPreset(sp.getString("preset", "Düz") ?: "Düz")
+                  h.postDelayed(pollRun, 5000)
+              }
+
+              override fun onStartCommand(i: Intent?, flags: Int, startId: Int): Int {
+                  startFg()
+                  if (i != null) {
+                      when (i.action) {
+                          A_PLAY -> mPlayPause()
+                          A_NEXT -> mNext()
+                          A_PREV -> mPrev()
+                          A_EQ -> {
+                              val names = Prefs.PRESETS.keys.toList()
+                              val cur = sp.getString("preset", "Düz")
+                              setPreset(names[(names.indexOf(cur) + 1) % names.size])
+                          }
+                          A_PRESET -> setPreset(i.getStringExtra("p") ?: "Düz")
+                          A_SLEEP -> {
+                              sleepIdx = (sleepIdx + 1) % sleepSteps.size
+                              setSleep(sleepSteps[sleepIdx])
+                          }
+                          A_SLEEPSET -> setSleep(i.getIntExtra("m", 0))
+                          A_STOP -> stopSelf()
+                      }
+                  }
+                  return START_STICKY
+              }
+
+              override fun onDestroy() {
+                  inst = null
+                  h.removeCallbacksAndMessages(null)
+                  try { unregisterReceiver(btRx) } catch (e: Exception) { }
+                  try { unregisterReceiver(phoneRx) } catch (e: Exception) { }
+                  try { msm.removeOnActiveSessionsChangedListener(sessListener) } catch (e: Exception) { }
+                  unhook()
+                  try { session.release() } catch (e: Exception) { }
+                  try { eq?.release() } catch (e: Exception) { }
+                  try { bb?.release() } catch (e: Exception) { }
+                  try { tts?.shutdown() } catch (e: Exception) { }
+                  abandonFocus()
+                  super.onDestroy()
+              }
+
+              private fun reg(r: BroadcastReceiver, f: IntentFilter) {
+                  if (Build.VERSION.SDK_INT >= 33) registerReceiver(r, f, Context.RECEIVER_EXPORTED)
+                  else registerReceiver(r, f)
+              }
+
+              // ---------------- Müzik uygulamalarını kontrol (Spotify, YT Music...) ----------------
+              private fun controllers(): List<MediaController> = try {
+                  msm.getActiveSessions(comp).filter { it.packageName != packageName }
+              } catch (e: SecurityException) {
+                  emptyList()
+              }
+
+              private fun target(): MediaController? {
+                  val l = controllers()
+                  return l.firstOrNull { it.playbackState?.state == PlaybackState.STATE_PLAYING } ?: l.firstOrNull()
+              }
+
+              fun mPlayPause() {
+                  val c = target() ?: return
+                  if (c.playbackState?.state == PlaybackState.STATE_PLAYING) c.transportControls.pause()
+                  else c.transportControls.play()
+              }
+
+              fun mNext() { target()?.transportControls?.skipToNext() }
+              fun mPrev() { target()?.transportControls?.skipToPrevious() }
+
+              private fun pauseAll() {
+                  for (c in controllers()) {
+                      if (c.playbackState?.state == PlaybackState.STATE_PLAYING) c.transportControls.pause()
+                  }
+              }
+
+              // Başka bir müzik uygulaması çalmaya başlayınca medya tuşu önceliğini geri al
+              private val cbs = ArrayList<Pair<MediaController, MediaController.Callback>>()
+              private val lastSt = HashMap<String, Int>()
+              private val claimRun = Runnable {
+                  try {
+                      session.isActive = false
+                      session.setPlaybackState(playingState())
+                      session.isActive = true
+                  } catch (e: Exception) {
+                  }
+              }
+
+              private fun scheduleClaim() {
+                  h.removeCallbacks(claimRun)
+                  h.postDelayed(claimRun, if (lite) 2000L else 600L)
+              }
+
+              private fun unhook() {
+                  for (p in cbs) {
+                      try { p.first.unregisterCallback(p.second) } catch (e: Exception) { }
+                  }
+                  cbs.clear()
+              }
+
+              private fun hookControllers(list: List<MediaController>) {
+                  unhook()
+                  if (lite) return
+                  for (c in list) {
+                      if (c.packageName == packageName) continue
+                      val k = c.packageName
+                      val callback = object : MediaController.Callback() {
+                          override fun onPlaybackStateChanged(state: PlaybackState?) {
+                              val st = state?.state ?: -1
+                              if (lastSt[k] != st) {
+                                  lastSt[k] = st
+                                  scheduleClaim()
+                              }
+                          }
+                      }
+                      try {
+                          c.registerCallback(callback, h)
+                          cbs.add(Pair(c, callback))
+                      } catch (e: Exception) {
+                      }
+                      val st0 = c.playbackState?.state ?: -1
+                      if (lastSt[k] != st0) {
+                          lastSt[k] = st0
+                          scheduleClaim()
+                      }
+                  }
+              }
+
+              private val sessListener = MediaSessionManager.OnActiveSessionsChangedListener { list ->
+                  hookControllers((list ?: emptyList<MediaController>()).filter { it.packageName != packageName })
+              }
+
+              fun registerSessions() {
+                  h.post {
+                      try { msm.removeOnActiveSessionsChangedListener(sessListener) } catch (e: Exception) { }
+                      try {
+                          msm.addOnActiveSessionsChangedListener(sessListener, comp, h)
+                          hookControllers(controllers())
+                      } catch (e: SecurityException) {
+                      }
+                  }
+              }
+
+              private fun playingState(): PlaybackState = PlaybackState.Builder()
+                  .setActions(
+                      PlaybackState.ACTION_PLAY or PlaybackState.ACTION_PAUSE or PlaybackState.ACTION_PLAY_PAUSE or
+                          PlaybackState.ACTION_SKIP_TO_NEXT or PlaybackState.ACTION_SKIP_TO_PREVIOUS
+                  )
+                  .setState(PlaybackState.STATE_PLAYING, 0L, 1f)
+                  .build()
+
+              // ---------------- JBL orta tuş ----------------
+              private var clicks = 0
+              private var longs = 0
+              private var holdFired = false
+              private val clickRun = Runnable {
+                  val n = clicks
+                  clicks = 0
+                  onClicks(n)
+              }
+              private val longRun = Runnable {
+                  val n = longs
+                  longs = 0
+                  if (!ringing && n > 0) {
+                      if (n == 1) mPrev() else mNext()
+                  }
+              }
+              private val holdRun = Runnable {
+                  holdFired = true
+                  longs++
+                  try {
+                      getSystemService(Vibrator::class.java).vibrate(VibrationEffect.createOneShot(60, VibrationEffect.DEFAULT_AMPLITUDE))
+                  } catch (e: Exception) {
+                  }
+              }
+
+              private fun onClicks(n: Int) {
+                  if (ringing) {
+                      h.removeCallbacks(announceRun)
+                      tts?.stop()
+                      if (n == 1) answerCall() else rejectCall()
+                      return
+                  }
+                  when (n) {
+                      1 -> mPlayPause()
+                      2 -> mNext()
+                      else -> mPrev()
+                  }
+              }
+
+              private fun answerCall() {
+                  try { getSystemService(TelecomManager::class.java).acceptRingingCall() } catch (e: Exception) { }
+              }
+
+              private fun rejectCall() {
+                  try { getSystemService(TelecomManager::class.java).endCall() } catch (e: Exception) { }
+              }
+
+              private val cb = object : MediaSession.Callback() {
+                  override fun onMediaButtonEvent(mediaButtonIntent: Intent): Boolean {
+                      val ke: KeyEvent? = if (Build.VERSION.SDK_INT >= 33)
+                          mediaButtonIntent.getParcelableExtra(Intent.EXTRA_KEY_EVENT, KeyEvent::class.java)
+                      else
+                          mediaButtonIntent.getParcelableExtra<KeyEvent>(Intent.EXTRA_KEY_EVENT)
+                      if (ke == null) return false
+                      when (ke.keyCode) {
+                          KeyEvent.KEYCODE_HEADSETHOOK, KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE,
+                          KeyEvent.KEYCODE_MEDIA_PLAY, KeyEvent.KEYCODE_MEDIA_PAUSE -> {
+                          }
+                          else -> return super.onMediaButtonEvent(mediaButtonIntent)
+                      }
+                      if (inCall && !ringing) return false
+                      if (ke.action == KeyEvent.ACTION_DOWN) {
+                          if (ke.repeatCount == 0) {
+                              h.removeCallbacks(clickRun)
+                              h.removeCallbacks(longRun)
+                              h.removeCallbacks(holdRun)
+                              holdFired = false
+                              h.postDelayed(holdRun, sp.getInt("holdSec", 3) * 1000L)
+                          }
+                      } else if (ke.action == KeyEvent.ACTION_UP) {
+                          h.removeCallbacks(holdRun)
+                          if (holdFired) {
+                              h.postDelayed(longRun, 1200L)
+                          } else {
+                              clicks++
+                              h.postDelayed(clickRun, 450L)
+                          }
+                          holdFired = false
+                      }
+                      return true
+                  }
+
+                  override fun onSkipToNext() { mNext() }
+                  override fun onSkipToPrevious() { mPrev() }
+                  override fun onPlay() { mPlayPause() }
+                  override fun onPause() { mPlayPause() }
+              }
+
+              // ---------------- Uyku zamanlayıcı ----------------
+              private val sleepRun = Runnable {
+                  pauseAll()
+                  sleepEnd = 0L
+                  sleepIdx = 0
+                  refresh()
+              }
+
+              fun setSleep(min: Int) {
+                  h.removeCallbacks(sleepRun)
+                  if (min > 0) {
+                      sleepEnd = System.currentTimeMillis() + min * 60000L
+                      h.postDelayed(sleepRun, min * 60000L)
+                      sleepIdx = sleepSteps.indexOf(min).let { if (it < 0) 0 else it }
+                  } else {
+                      sleepEnd = 0L
+                      sleepIdx = 0
+                  }
+                  refresh()
+              }
+
+              // ---------------- Equalizer ----------------
+              private var eq: Equalizer? = null
+              private var bb: BassBoost? = null
+
+              fun setPreset(name: String) {
+                  sp.edit().putString("preset", name).apply()
+                  try {
+                      if (eq == null) {
+                          eq = Equalizer(0, 0)
+                          eq!!.setEnabled(true)
+                      }
+                      val e = eq!!
+                      val r = e.bandLevelRange
+                      val n = e.numberOfBands.toInt()
+                      val pts = Prefs.PRESETS[name] ?: Prefs.PRESETS.values.first()
+                      for (i in 0 until n) {
+                          val t = if (n == 1) 0f else i * 4f / (n - 1)
+                          val lo = t.toInt().coerceAtMost(3)
+                          val f = t - lo
+                          val db = pts[lo] * (1 - f) + pts[lo + 1] * f
+                          val mb = (db * 100).toInt().coerceIn(r[0].toInt(), r[1].toInt())
+                          e.setBandLevel(i.toShort(), mb.toShort())
+                      }
+                  } catch (e: Exception) {
+                  }
+                  try {
+                      if (bb == null) {
+                          bb = BassBoost(0, 0)
+                          bb!!.setEnabled(true)
+                      }
+                      if (bb!!.strengthSupported) {
+                          bb!!.setStrength((if (name == "Bass") 700 else 0).toShort())
+                      }
+                  } catch (e: Exception) {
+                  }
+                  refresh()
+              }
+
+              // ---------------- Konuşma (TTS) ----------------
+              private var tts: TextToSpeech? = null
+              private var ttsReady = false
+              private val q = ArrayList<Pair<String, String>>()
+              private var curKey: String? = null
+              private var focusReq: AudioFocusRequest? = null
+              private val attrs = AudioAttributes.Builder()
+                  .setUsage(AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
+                  .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                  .build()
+
+              private fun initTts() {
+                  tts = TextToSpeech(this) { s ->
+                      if (s == TextToSpeech.SUCCESS) {
+                          tts?.setLanguage(Locale("tr", "TR"))
+                          tts?.setAudioAttributes(attrs)
+                          tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+                              override fun onStart(id: String?) {}
+                              override fun onDone(id: String?) { fin(id) }
+                              override fun onError(id: String?) { fin(id) }
+                              override fun onStop(id: String?, interrupted: Boolean) { fin(id) }
+                          })
+                          ttsReady = true
+                      }
+                  }
+              }
+
+              private fun fin(id: String?) {
+                  h.post {
+                      if (id != null && id == curKey) {
+                          curKey = null
+                          speakNext()
+                      }
+                  }
+              }
+
+              private fun requestFocus() {
+                  if (focusReq == null) {
+                      focusReq = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
+                          .setAudioAttributes(attrs).build()
+                      am.requestAudioFocus(focusReq!!)
+                  }
+              }
+
+              private fun abandonFocus() {
+                  focusReq?.let { am.abandonAudioFocusRequest(it) }
+                  focusReq = null
+              }
+
+              private fun speakNext() {
+                  if (q.isEmpty()) {
+                      abandonFocus()
+                      return
+                  }
+                  val p = q.removeAt(0)
+                  curKey = p.first
+                  requestFocus()
+                  tts?.speak(p.second, TextToSpeech.QUEUE_FLUSH, null, p.first)
+              }
+
+              fun enqueue(key: String, text: String) {
+                  h.post {
+                      if (ttsReady) {
+                          q.add(Pair(key, text))
+                          if (curKey == null) speakNext()
+                      }
+                  }
+              }
+
+              fun cancelKey(key: String) {
+                  h.post {
+                      q.removeAll { it.first == key }
+                      if (curKey == key) tts?.stop()
+                  }
+              }
+
+              private fun announce(text: String) {
+                  if (!ttsReady) return
+                  q.clear()
+                  curKey = "call"
+                  requestFocus()
+                  tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "call")
+              }
+
+              // ---------------- Arama ----------------
+              private var ringing = false
+              private var inCall = false
+              private var announced = false
+              private var lastNum: String? = null
+              private var pausedCtl: MediaController? = null
+              private val announceRun = Runnable { doAnnounce() }
+
+              private val phoneRx = object : BroadcastReceiver() {
+                  override fun onReceive(c: Context?, i: Intent?) {
+                      if (i == null) return
+                      val st = i.getStringExtra(TelephonyManager.EXTRA_STATE)
+                      val num = i.getStringExtra("incoming_number")
+                      when (st) {
+                          TelephonyManager.EXTRA_STATE_RINGING -> {
+                              if (!ringing) {
+                                  ringing = true
+                                  inCall = true
+                                  announced = false
+                                  lastNum = null
+                                  pauseForCall()
+                                  h.postDelayed(announceRun, 1500L)
+                              }
+                              if (num != null) {
+                                  lastNum = num
+                                  if (!announced) {
+                                      h.removeCallbacks(announceRun)
+                                      doAnnounce()
+                                  }
+                              }
+                          }
+                          TelephonyManager.EXTRA_STATE_OFFHOOK -> {
+                              ringing = false
+                              inCall = true
+                              h.removeCallbacks(announceRun)
+                              q.clear()
+                              curKey = null
+                              tts?.stop()
+                              abandonFocus()
+                          }
+                          TelephonyManager.EXTRA_STATE_IDLE -> {
+                              ringing = false
+                              inCall = false
+                              h.removeCallbacks(announceRun)
+                              resumeAfterCall()
+                          }
+                      }
+                  }
+              }
+
+              private fun pauseForCall() {
+                  pausedCtl = null
+                  val c = target()
+                  if (c != null && c.playbackState?.state == PlaybackState.STATE_PLAYING) {
+                      c.transportControls.pause()
+                      pausedCtl = c
+                  }
+              }
+
+              private fun resumeAfterCall() {
+                  val c = pausedCtl
+                  pausedCtl = null
+                  if (c != null) {
+                      h.postDelayed({
+                          try { c.transportControls.play() } catch (e: Exception) { }
+                      }, 1200L)
+                  }
+              }
+
+              private fun doAnnounce() {
+                  if (announced) return
+                  announced = true
+                  if (!sp.getBoolean("annCall", true)) return
+                  val n = lookup(lastNum)
+                  val t = when {
+                      n != null -> n + " olarak kaydettiğiniz kişi arıyor"
+                      lastNum.isNullOrBlank() -> "Numara gizli, biri arıyor"
+                      else -> "Kayıtlı olmayan bir numara arıyor"
+                  }
+                  announce(t)
+              }
+
+              private fun lookup(num: String?): String? {
+                  if (num.isNullOrBlank()) return null
+                  try {
+                      val u = Uri.withAppendedPath(ContactsContract.PhoneLookup.CONTENT_FILTER_URI, Uri.encode(num))
+                      contentResolver.query(u, arrayOf(ContactsContract.PhoneLookup.DISPLAY_NAME), null, null, null)?.use {
+                          if (it.moveToFirst()) return it.getString(0)
+                      }
+                  } catch (e: Exception) {
+                  }
+                  return null
+              }
+
+              // ---------------- Bluetooth: kulaklık pili + araç tespiti ----------------
+              private val devs = LinkedHashMap<String, String>()
+              private val batt = HashMap<String, Int>()
+              private val cars = HashSet<String>()
+              private val alerted = HashSet<String>()
+
+              private fun remote(a: String): BluetoothDevice? = try {
+                  getSystemService(BluetoothManager::class.java).adapter.getRemoteDevice(a)
+              } catch (e: Exception) {
+                  null
+              }
+
+              private fun isCarDev(d: BluetoothDevice): Boolean = try {
+                  val kw = (sp.getString("carName", "") ?: "").trim()
+                  val nm = d.name ?: ""
+                  if (kw.isNotEmpty() && nm.contains(kw, true)) true
+                  else d.bluetoothClass?.deviceClass == BluetoothClass.Device.AUDIO_VIDEO_CAR_AUDIO
+              } catch (e: Exception) {
+                  false
+              }
+
+              fun carConnected(): Boolean {
+                  if (cars.isNotEmpty()) return true
+                  return try {
+                      getSystemService(UiModeManager::class.java).currentModeType == Configuration.UI_MODE_TYPE_CAR
+                  } catch (e: Exception) {
+                      false
+                  }
+              }
+
+              private fun mainDev(): String? {
+                  for (e in devs.entries) {
+                      if (!cars.contains(e.key) && e.value.contains("jbl", true)) return e.key
+                  }
+                  for (k in devs.keys) {
+                      if (!cars.contains(k)) return k
+                  }
+                  return null
+              }
+
+              private fun scanBt() {
+                  try {
+                      for (d in am.getDevices(AudioManager.GET_DEVICES_OUTPUTS)) {
+                          if (d.type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP || d.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO) {
+                              val a = d.address
+                              if (a != null && a.isNotEmpty()) {
+                                  devs[a] = d.productName.toString()
+                                  val bd = remote(a)
+                                  if (bd != null && isCarDev(bd)) cars.add(a)
+                              }
+                          }
+                      }
+                  } catch (e: Exception) {
+                  }
+              }
+
+              private fun readBattery(d: BluetoothDevice): Int = try {
+                  d.javaClass.getMethod("getBatteryLevel").invoke(d) as Int
+              } catch (e: Throwable) {
+                  -1
+              }
+
+              private fun setBattery(addr: String, lvl: Int) {
+                  batt[addr] = lvl
+                  if (lvl > 30) alerted.removeAll { it.startsWith(addr) }
+                  if (addr == mainDev()) {
+                      for (t in intArrayOf(20, 10)) {
+                          if (lvl <= t && alerted.add(addr + t)) {
+                              enqueue("batt" + t, "Kulaklık pili yüzde " + lvl)
+                              break
+                          }
+                      }
+                  }
+                  refresh()
+              }
+
+              private val pollRun = object : Runnable {
+                  override fun run() {
+                      for (a in devs.keys.toList()) {
+                          val d = remote(a) ?: continue
+                          val l = readBattery(d)
+                          if (l in 0..100) setBattery(a, l)
+                      }
+                      if (!lite) h.postDelayed(this, 180000L)
+                  }
+              }
+
+              private val btRx = object : BroadcastReceiver() {
+                  override fun onReceive(c: Context?, i: Intent?) {
+                      if (i == null) return
+                      val d: BluetoothDevice? = if (Build.VERSION.SDK_INT >= 33)
+                          i.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE, BluetoothDevice::class.java)
+                      else
+                          i.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE)
+                      if (d == null) return
+                      val a = d.address ?: return
+                      when (i.action) {
+                          BluetoothDevice.ACTION_ACL_CONNECTED -> {
+                              devs[a] = try { d.name ?: "Bluetooth" } catch (e: Exception) { "Bluetooth" }
+                              if (isCarDev(d)) cars.add(a)
+                              h.removeCallbacks(pollRun)
+                              h.postDelayed(pollRun, 4000L)
+                              refresh()
+                          }
+                          BluetoothDevice.ACTION_ACL_DISCONNECTED -> {
+                              devs.remove(a)
+                              batt.remove(a)
+                              cars.remove(a)
+                              refresh()
+                          }
+                          "android.bluetooth.device.action.BATTERY_LEVEL_CHANGED" -> {
+                              val l = i.getIntExtra("android.bluetooth.device.extra.BATTERY_LEVEL", -1)
+                              if (l in 0..100) {
+                                  if (!devs.containsKey(a)) devs[a] = try { d.name ?: "Bluetooth" } catch (e: Exception) { "Bluetooth" }
+                                  setBattery(a, l)
+                              }
+                          }
+                      }
+                  }
+              }
+          }
+          EOF_7
+          mkdir -p "$(dirname 'app/src/main/java/com/jbl/optimizer/MainActivity.kt')"
+          cat > 'app/src/main/java/com/jbl/optimizer/MainActivity.kt' <<'EOF_8'
+          package com.jbl.optimizer
+
+          import android.Manifest
+          import android.app.Activity
+          import android.content.Intent
+          import android.content.SharedPreferences
+          import android.graphics.Color
+          import android.graphics.Typeface
+          import android.os.Build
+          import android.os.Bundle
+          import android.provider.Settings
+          import android.text.Editable
+          import android.text.TextWatcher
+          import android.view.View
+          import android.view.ViewGroup
+          import android.widget.Button
+          import android.widget.CheckBox
+          import android.widget.EditText
+          import android.widget.LinearLayout
+          import android.widget.ScrollView
+          import android.widget.SeekBar
+          import android.widget.Switch
+          import android.widget.TextView
+
+          class MainActivity : Activity() {
+
+              private val BG = Color.parseColor("#121212")
+              private val CARD = Color.parseColor("#2A2A2A")
+              private val ACC = Color.parseColor("#FF5500")
+              private val TXT = Color.WHITE
+              private val SUB = Color.parseColor("#AAAAAA")
+
+              private lateinit var sp: SharedPreferences
+              private lateinit var status: TextView
+              private val presetBtns = LinkedHashMap<String, Button>()
+
+              private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
+
+              private fun tv(t: String, size: Float, color: Int, bold: Boolean): TextView {
+                  val x = TextView(this)
+                  x.text = t
+                  x.textSize = size
+                  x.setTextColor(color)
+                  if (bold) x.setTypeface(x.typeface, Typeface.BOLD)
+                  x.setPadding(0, dp(6), 0, dp(6))
+                  return x
+              }
+
+              private fun btn(t: String, f: () -> Unit): Button {
+                  val b = Button(this)
+                  b.text = t
+                  b.isAllCaps = false
+                  b.setTextColor(TXT)
+                  b.setBackgroundColor(CARD)
+                  b.setOnClickListener { f() }
+                  return b
+              }
+
+              private fun row(vararg v: View): LinearLayout {
+                  val r = LinearLayout(this)
+                  r.orientation = LinearLayout.HORIZONTAL
+                  for (x in v) {
+                      val lp = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+                      lp.setMargins(dp(3), dp(3), dp(3), dp(3))
+                      r.addView(x, lp)
+                  }
+                  return r
+              }
+
+              private fun sw(label: String, key: String, def: Boolean): Switch {
+                  val s = Switch(this)
+                  s.text = label
+                  s.setTextColor(TXT)
+                  s.isChecked = sp.getBoolean(key, def)
+                  s.setPadding(0, dp(8), 0, dp(8))
+                  s.setOnCheckedChangeListener { _, v -> sp.edit().putBoolean(key, v).apply() }
+                  return s
+              }
+
+              private fun svc(a: String, extra: (Intent) -> Unit) {
+                  val i = Intent(this, OptService::class.java)
+                  i.action = a
+                  extra(i)
+                  try {
+                      startForegroundService(i)
+                  } catch (e: Exception) {
+                  }
+                  status.postDelayed({ updateStatus() }, 600L)
+              }
+
+              private fun nlsOn(): Boolean {
+                  val s = Settings.Secure.getString(contentResolver, "enabled_notification_listeners") ?: ""
+                  return s.contains(packageName)
+              }
+
+              private fun updateStatus() {
+                  val run = if (OptService.inst != null) "çalışıyor ✔" else "kapalı ✘"
+                  val nl = if (nlsOn()) "verildi ✔" else "verilmedi ✘ (tuş/müzik/mesaj için gerekli)"
+                  status.text = "Servis: " + run + "\nBildirim erişimi: " + nl
+              }
+
+              private fun markPresets() {
+                  val cur = sp.getString("preset", "Düz")
+                  for ((k, b) in presetBtns) b.setBackgroundColor(if (k == cur) ACC else CARD)
+              }
+
+              override fun onCreate(b: Bundle?) {
+                  super.onCreate(b)
+                  sp = Prefs.sp(this)
+                  window.statusBarColor = BG
+                  window.navigationBarColor = BG
+
+                  val root = LinearLayout(this)
+                  root.orientation = LinearLayout.VERTICAL
+                  root.setPadding(dp(16), dp(24), dp(16), dp(32))
+                  val scroll = ScrollView(this)
+                  scroll.setBackgroundColor(BG)
+                  scroll.addView(root)
+                  setContentView(scroll)
+
+                  root.addView(tv("JBL Optimizer", 26f, ACC, true))
+                  status = tv("", 14f, SUB, false)
+                  root.addView(status)
+
+                  root.addView(row(
+                      btn("▶ Başlat") { svc("") { } },
+                      btn("■ Durdur") { stopService(Intent(this, OptService::class.java)); status.postDelayed({ updateStatus() }, 600L) }
+                  ))
+                  root.addView(row(
+                      btn("İzinleri ver") {
+                          val p = arrayListOf(
+                              Manifest.permission.READ_PHONE_STATE,
+                              Manifest.permission.READ_CALL_LOG,
+                              Manifest.permission.READ_CONTACTS,
+                              Manifest.permission.ANSWER_PHONE_CALLS
+                          )
+                          if (Build.VERSION.SDK_INT >= 31) p.add("android.permission.BLUETOOTH_CONNECT")
+                          if (Build.VERSION.SDK_INT >= 33) p.add("android.permission.POST_NOTIFICATIONS")
+                          requestPermissions(p.toTypedArray(), 1)
+                      },
+                      btn("Bildirim erişimi") { startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) }
+                  ))
+
+                  // ---- EQ ----
+                  root.addView(tv("Ekolayzır", 18f, TXT, true))
+                  val names = Prefs.PRESETS.keys.toList()
+                  var i = 0
+                  while (i < names.size) {
+                      val views = ArrayList<View>()
+                      for (j in i until minOf(i + 3, names.size)) {
+                          val n = names[j]
+                          val bt = btn(n) {
+                              sp.edit().putString("preset", n).apply()
+                              svc(OptService.A_PRESET) { it.putExtra("p", n) }
+                              markPresets()
+                          }
+                          presetBtns[n] = bt
+                          views.add(bt)
+                      }
+                      root.addView(row(*views.toTypedArray()))
+                      i += 3
+                  }
+                  markPresets()
+                  root.addView(tv("Sistem geneli EQ kullanır. Bazı telefonlarda Spotify/YT Music EQ'yu yok sayabilir.", 12f, SUB, false))
+
+                  // ---- Orta tuş ----
+                  root.addView(tv("Orta tuş", 18f, TXT, true))
+                  val hl = tv("Uzun basma süresi: " + sp.getInt("holdSec", 3) + " sn", 14f, TXT, false)
+                  root.addView(hl)
+                  val sb = SeekBar(this)
+                  sb.max = 4
+                  sb.progress = sp.getInt("holdSec", 3) - 1
+                  sb.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                      override fun onProgressChanged(s: SeekBar?, p: Int, u: Boolean) {
+                          sp.edit().putInt("holdSec", p + 1).apply()
+                          hl.text = "Uzun basma süresi: " + (p + 1) + " sn"
+                      }
+                      override fun onStartTrackingTouch(s: SeekBar?) {}
+                      override fun onStopTrackingTouch(s: SeekBar?) {}
+                  })
+                  root.addView(sb)
+                  root.addView(tv(
+                      "1 kısa: oynat/durdur · 2 kısa: ileri · 3 kısa: geri\n1 uzun: önceki şarkı · 2 uzun: sonraki şarkı\nArama: 1 basış kabul · 2 basış reddet",
+                      12f, SUB, false
+                  ))
+
+                  // ---- Arama / mesaj ----
+                  root.addView(tv("Arama ve mesajlar", 18f, TXT, true))
+                  root.addView(sw("Arayanı sesli söyle", "annCall", true))
+                  root.addView(sw("Mesajları sesli oku", "readMsgs", true))
+                  root.addView(sw("Sürüş modu (sadece araçtayken oku)", "driveOnly", false))
+                  root.addView(tv("Araç Bluetooth adı (isteğe bağlı, ör. Renault)", 12f, SUB, false))
+                  val et = EditText(this)
+                  et.setTextColor(TXT)
+                  et.setHintTextColor(SUB)
+                  et.hint = "Araç adı"
+                  et.setText(sp.getString("carName", ""))
+                  et.addTextChangedListener(object : TextWatcher {
+                      override fun beforeTextChanged(a: CharSequence?, b: Int, c: Int, d: Int) {}
+                      override fun onTextChanged(a: CharSequence?, b: Int, c: Int, d: Int) {}
+                      override fun afterTextChanged(e: Editable?) {
+                          sp.edit().putString("carName", (e?.toString() ?: "").trim()).apply()
+                      }
+                  })
+                  root.addView(et)
+
+                  root.addView(tv("Okunacak uygulamalar", 14f, TXT, true))
+                  for ((pkg, label) in Prefs.APPS) {
+                      val cbx = CheckBox(this)
+                      cbx.text = label
+                      cbx.setTextColor(TXT)
+                      val cur = sp.getStringSet("pkgs", Prefs.DEFAULT_PKGS) ?: Prefs.DEFAULT_PKGS
+                      cbx.isChecked = cur.contains(pkg)
+                      cbx.setOnCheckedChangeListener { _, v ->
+                          val s = HashSet<String>(sp.getStringSet("pkgs", Prefs.DEFAULT_PKGS) ?: Prefs.DEFAULT_PKGS)
+                          if (v) s.add(pkg) else s.remove(pkg)
+                          sp.edit().putStringSet("pkgs", s).apply()
+                      }
+                      root.addView(cbx)
+                  }
+
+                  // ---- Uyku ----
+                  root.addView(tv("Uyku zamanlayıcı", 18f, TXT, true))
+                  root.addView(row(
+                      btn("Kapalı") { svc(OptService.A_SLEEPSET) { it.putExtra("m", 0) } },
+                      btn("15 dk") { svc(OptService.A_SLEEPSET) { it.putExtra("m", 15) } },
+                      btn("30 dk") { svc(OptService.A_SLEEPSET) { it.putExtra("m", 30) } },
+                      btn("60 dk") { svc(OptService.A_SLEEPSET) { it.putExtra("m", 60) } }
+                  ))
+
+                  // ---- Genel ----
+                  root.addView(tv("Genel", 18f, TXT, true))
+                  root.addView(sw("Ultra düşük RAM / pil modu (yeniden başlat)", "lite", false))
+              }
+
+              override fun onResume() {
+                  super.onResume()
+                  updateStatus()
+              }
+          }
+          EOF_8
+
+      - name: APK derle
+        run: gradle assembleDebug --no-daemon --stacktrace
+
+      - name: APK adını düzenle
+        run: cp app/build/outputs/apk/debug/app-debug.apk JBL-Optimizer.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: JBL-Optimizer-apk
+          path: JBL-Optimizer.apk
+
+      - name: Release olarak yayınla
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "v${{ github.run_number }}" JBL-Optimizer.apk --title "JBL Optimizer v${{ github.run_number }}" --notes "Otomatik derleme"
